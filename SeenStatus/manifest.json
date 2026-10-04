@@ -1,6 +1,6 @@
 {
   "name": "Seen Status",
-  "description": "Adds \u2713 Sent, \u2713\u2713 Seen, ? Unknown, or \u2715 Not sent below your own messages. Seen is shown only when a compatible internal event explicitly confirms a recipient read.",
+  "description": "Shows Sent/Not sent status for your own messages. Seen is shown only after an explicit recipient-read event; never inferred.",
   "authors": [
     {
       "name": "GAMER_INFINITE"
@@ -10,5 +10,6 @@
   "vendetta": {
     "icon": "ic_message_24px"
   },
-  "hash": "57ea34f8fa48472a11e4f4681c9bda0fabad91eab49f86e7c59a1b5943d606f6"
+  "version": "1.0.3",
+  "hash": "04d5c9c3cbf8b8e804d49434208874cd21136ae57e2c723f2dc633b452b11fdb"
 }
