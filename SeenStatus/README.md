@@ -1,10 +1,13 @@
 # Seen Status
 
-Shows a status line below your own messages.
+Toggle-safe ShiggyCord/Vendetta-family plugin.
 
-- `✓ Sent` — send succeeded.
-- `✓✓ Seen` — only when a compatible internal event explicitly identifies a recipient read.
-- `? Unknown` — send succeeded but recipient-read state could not be determined.
-- `✕ Not sent` — a supported send failure exposes a message id.
+Statuses:
+- ✓ Sent — confirmed send result.
+- ✓✓ Seen — ONLY an explicit recipient-read event can set this.
+- ? Unknown — read state is not available/detectable.
+- ✕ Not sent — supported send failure.
 
-Discord normally does not expose per-message recipient read receipts, so the plugin does not fake Seen.
+No channel-open, typing, online state, local read marker, timeout, or message visibility is treated as proof of Seen.
+
+If the client exposes no genuine recipient-read event, Seen will never appear.
