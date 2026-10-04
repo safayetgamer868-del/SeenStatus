@@ -1,1 +1,0 @@
-# Shiggycord-revenge-kettu-plugins
