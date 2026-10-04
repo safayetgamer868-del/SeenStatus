@@ -1,0 +1,14 @@
+{
+  "name": "Seen Status",
+  "description": "Shows Sent/Not sent status for your own Discord messages and only shows Seen when a compatible client event explicitly identifies a recipient read.",
+  "authors": [
+    {
+      "name": "GAMER_INFINITE"
+    }
+  ],
+  "main": "index.js",
+  "vendetta": {
+    "icon": "ic_message_24px"
+  },
+  "hash": "8f575479a2df79bac45fa5785af2ec5a1235372bb6b2e72a6efa613982cf1e14"
+}
