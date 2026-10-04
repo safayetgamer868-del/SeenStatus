@@ -2,160 +2,146 @@ import { findByProps, findByName } from "@vendetta/metro";
 import { after } from "@vendetta/patcher";
 import { ReactNative as RN } from "@vendetta/metro/common";
 
-/**
- * Seen Status
- * Adds a small status line below your own messages:
- *   ✓ Sent       message was successfully sent
- *   ✓✓ Seen      a compatible internal read event confirmed the recipient read it
- *   ? Unknown    the message exists but its recipient-read state cannot be determined
- *   ✕ Not sent   the send operation failed
- *
- * IMPORTANT: Discord does not normally expose recipient-side DM read receipts.
- * This plugin never treats opening a channel, typing, or a local read marker as
- * proof that the recipient read a specific message.
- */
-
 const statusByMessage = new Map();
 const unpatches = [];
-let readEventAvailable = false;
 
-const MessageActions = findByProps("sendMessage") || findByProps("sendMessage", "editMessage");
-const Message = findByName("Message", false) || findByName("Message");
+function safeFindProps(...props) {
+    try { return findByProps(...props); } catch (_) { return null; }
+}
+
+function safeFindName(name) {
+    try { return findByName(name, false) || findByName(name); } catch (_) { return null; }
+}
 
 function setStatus(id, status) {
-    if (!id) return;
-    statusByMessage.set(String(id), status);
+    if (id != null) statusByMessage.set(String(id), status);
 }
 
 function patchSend() {
-    if (!MessageActions?.sendMessage) return;
+    try {
+        const actions = safeFindProps("sendMessage") || safeFindProps("sendMessage", "editMessage");
+        if (!actions?.sendMessage) return;
 
-    unpatches.push(after("sendMessage", MessageActions, (_args, result) => {
-        if (result?.then) {
-            return result.then((value) => {
-                const id = value?.id ?? value?.message?.id;
-                if (id) {
-                    setStatus(id, "sent");
-                    // If no supported read event is available, the send itself is
-                    // still known; read state remains unknown until a real event arrives.
-                    if (!readEventAvailable) {
-                        setTimeout(() => {
-                            const key = String(id);
-                            if (statusByMessage.get(key) === "sent") setStatus(key, "unknown");
-                        }, 2500);
-                    }
+        const patch = after("sendMessage", actions, (_args, result) => {
+            try {
+                if (result?.then) {
+                    return result.then((value) => {
+                        const id = value?.id ?? value?.message?.id;
+                        if (id != null) setStatus(id, "sent");
+                        return value;
+                    }).catch((error) => {
+                        const id = error?.messageId ?? error?.id;
+                        if (id != null) setStatus(id, "failed");
+                        throw error;
+                    });
                 }
-                return value;
-            }).catch((error) => {
-                const localId = error?.messageId ?? error?.id;
-                if (localId) setStatus(localId, "failed");
-                throw error;
-            });
-        }
-
-        const id = result?.id ?? result?.message?.id;
-        if (id) setStatus(id, "sent");
-        return result;
-    }));
+                const id = result?.id ?? result?.message?.id;
+                if (id != null) setStatus(id, "sent");
+            } catch (_) {}
+            return result;
+        });
+        if (typeof patch === "function") unpatches.push(patch);
+    } catch (_) {}
 }
 
-function makeStatusNode(status) {
+function patchReadEvents() {
+    try {
+        const dispatcher = safeFindProps("dispatch", "subscribe") || safeFindProps("dispatch");
+        if (!dispatcher?.subscribe) return;
+
+        // IMPORTANT: subscribing is not evidence of a read. Seen is set ONLY
+        // when the payload explicitly identifies a recipient-read receipt.
+        const events = [
+            "MESSAGE_READ_RECEIPT",
+            "MESSAGE_RECIPIENT_READ",
+            "MESSAGE_SEEN",
+            "MESSAGE_READ",
+        ];
+
+        for (const event of events) {
+            try {
+                const unsub = dispatcher.subscribe(event, (payload) => {
+                    try {
+                        const id = payload?.messageId
+                            ?? payload?.message_id
+                            ?? payload?.message?.id;
+                        const explicitRead = payload?.recipientRead === true
+                            || payload?.recipient_read === true
+                            || payload?.recipientHasRead === true
+                            || payload?.recipient_has_read === true
+                            || payload?.readReceipt === true
+                            || payload?.read_receipt === true;
+                        if (id != null && explicitRead) setStatus(id, "seen");
+                    } catch (_) {}
+                });
+                if (typeof unsub === "function") unpatches.push(unsub);
+            } catch (_) {}
+        }
+    } catch (_) {}
+}
+
+function makeStatus(status) {
     const labels = {
         sent: "✓ Sent",
         seen: "✓✓ Seen",
         unknown: "? Unknown",
         failed: "✕ Not sent",
     };
-    const label = labels[status] || "? Unknown";
-    const textColor = status === "failed" ? "#f23f42" : undefined;
-
-    return RN.createElement(RN.Text, {
-        style: {
-            fontSize: 10,
-            lineHeight: 14,
-            opacity: 0.7,
-            marginTop: 2,
-            color: textColor,
-        },
-    }, label);
-}
-
-function appendStatus(ret, status) {
-    if (!ret || !status) return ret;
-
-    const node = makeStatusNode(status);
-
-    // React elements are immutable-ish in normal React usage; clone instead of
-    // mutating ret.props directly. This also works when the message root has
-    // existing children.
     try {
-        const children = ret.props?.children;
-        if (Array.isArray(children)) {
-            return RN.cloneElement(ret, {}, ...children, node);
-        }
-        if (children != null) {
-            return RN.cloneElement(ret, {}, children, node);
-        }
-        return RN.cloneElement(ret, {}, node);
+        return RN.createElement(RN.Text, {
+            style: {
+                fontSize: 10,
+                lineHeight: 14,
+                opacity: 0.7,
+                marginTop: 2,
+                color: status === "failed" ? "#f23f42" : undefined,
+            },
+        }, labels[status] || "? Unknown");
     } catch (_) {
-        return ret;
+        return null;
     }
 }
 
 function patchMessageRenderer() {
-    if (!Message) return;
-
     try {
-        unpatches.push(after("default", Message, (_args, ret) => {
-            const props = ret?.props;
-            const message = props?.message;
-            const id = message?.id ?? props?.id;
-            if (!id) return ret;
+        const Message = safeFindName("Message");
+        if (!Message) return;
 
-            const status = statusByMessage.get(String(id));
-            if (!status) return ret;
-            return appendStatus(ret, status);
-        }));
-    } catch (_) {
-        // Some client builds expose Message differently; leave the plugin loaded.
-    }
-}
+        const patch = after("default", Message, (_args, ret) => {
+            try {
+                const message = ret?.props?.message;
+                const id = message?.id ?? ret?.props?.id;
+                if (id == null) return ret;
 
-function tryInstallReadHook() {
-    const Dispatcher = findByProps("dispatch", "subscribe") || findByProps("dispatch");
-    if (!Dispatcher?.subscribe) return;
+                // Do not show status on other people's messages.
+                // Different Discord builds expose different self markers.
+                const own = message?.isAuthor === true || message?.isMe === true;
+                if (!own) return ret;
 
-    const candidateEvents = [
-        "MESSAGE_READ_RECEIPT",
-        "MESSAGE_RECIPIENT_READ",
-        "MESSAGE_SEEN",
-        "MESSAGE_READ",
-    ];
+                const status = statusByMessage.get(String(id));
+                if (!status || !ret?.props) return ret;
 
-    for (const event of candidateEvents) {
-        try {
-            const unsub = Dispatcher.subscribe(event, (payload) => {
-                const id = payload?.messageId ?? payload?.message_id ?? payload?.id;
-                const recipientRead = payload?.recipientRead === true || payload?.read === true || payload?.seen === true;
-                if (id && recipientRead) {
-                    readEventAvailable = true;
-                    setStatus(id, "seen");
-                }
-            });
-            if (typeof unsub === "function") {
-                readEventAvailable = true;
-                unpatches.push(unsub);
+                const node = makeStatus(status);
+                if (!node || typeof RN.cloneElement !== "function") return ret;
+
+                const children = ret.props.children;
+                if (Array.isArray(children)) return RN.cloneElement(ret, {}, ...children, node);
+                if (children != null) return RN.cloneElement(ret, {}, children, node);
+                return RN.cloneElement(ret, {}, node);
+            } catch (_) {
+                return ret;
             }
-        } catch (_) {
-            // Event is not present on this client build.
-        }
-    }
+        });
+        if (typeof patch === "function") unpatches.push(patch);
+    } catch (_) {}
 }
 
 export default {
     onLoad() {
+        // Every subsystem is isolated so an unsupported internal API cannot
+        // make the plugin toggle immediately back off.
         patchSend();
-        tryInstallReadHook();
+        patchReadEvents();
         patchMessageRenderer();
     },
     onUnload() {
@@ -163,6 +149,5 @@ export default {
             try { unpatch(); } catch (_) {}
         }
         statusByMessage.clear();
-        readEventAvailable = false;
     },
 };
